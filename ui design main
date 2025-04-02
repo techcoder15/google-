@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Techelp - AI Study Planner</title>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #74ebd5, #acb6e5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 380px;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h2 {
+            color: #333;
+            font-weight: 600;
+        }
+
+        input {
+            width: 85%;
+            margin: 10px 0;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Modern Login Page -->
+    <div class="container" id="login-page">
+        <h2>🔐 Welcome to Techelp</h2>
+        <p>Sign in to access your AI study planner</p>
+        <form id="login-form">
+            <input type="email" id="email" placeholder="Enter your email" required>
+            <input type="password" id="password" placeholder="Enter your password" required>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
+    <!-- Marks Input Page -->
+    <div class="container hidden" id="marks-page">
+        <h2>Enter Your Marks</h2>
+        <form id="marks-form">
+            <input type="number" id="math" placeholder="Math Marks" min="0" max="100" required>
+            <input type="number" id="science" placeholder="Science Marks" min="0" max="100" required>
+            <input type="number" id="social" placeholder="Social Marks" min="0" max="100" required>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+
+    <!-- Study Feedback (AI will generate) -->
+    <div class="container hidden" id="feedback-page">
+        <h2>📊 Study Feedback</h2>
+        <p>(AI will analyze your marks and give feedback here)</p>
+        <button id="go-to-timetable">Next</button>
+    </div>
+
+    <!-- Study Timetable (AI will generate) -->
+    <div class="container hidden" id="timetable-page">
+        <h2>📅 Study Timetable</h2>
+        <p>(AI will generate your personalized timetable here)</p>
+        <button id="go-to-todo">Next</button>
+    </div>
+
+    <!-- To-Do List (AI will generate) -->
+    <div class="container hidden" id="todolist-page">
+        <h2>✅ Study Plan</h2>
+        <p>(AI will create your personalized to-do list here)</p>
+    </div>
+
+    <script>
+        document.getElementById("login-form").addEventListener("submit", function(event) {
+            event.preventDefault();
+            document.getElementById("login-page").classList.add("hidden");
+            document.getElementById("marks-page").classList.remove("hidden");
+        });
+
+        document.getElementById("marks-form").addEventListener("submit", function(event) {
+            event.preventDefault();
+            
+            let math = parseInt(document.getElementById("math").value);
+            let science = parseInt(document.getElementById("science").value);
+            let social = parseInt(document.getElementById("social").value);
+
+            localStorage.setItem("math", math);
+            localStorage.setItem("science", science);
+            localStorage.setItem("social", social);
+
+            document.getElementById("marks-page").classList.add("hidden");
+            document.getElementById("feedback-page").classList.remove("hidden");
+        });
+
+        document.getElementById("go-to-timetable").addEventListener("click", function() {
+            document.getElementById("feedback-page").classList.add("hidden");
+            document.getElementById("timetable-page").classList.remove("hidden");
+        });
+
+        document.getElementById("go-to-todo").addEventListener("click", function() {
+            document.getElementById("timetable-page").classList.add("hidden");
+            document.getElementById("todolist-page").classList.remove("hidden");
+        });
+    </script>
+</body>
+</html>
+
