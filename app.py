@@ -214,6 +214,15 @@ st.markdown("""
         margin-bottom: 10px;
         border-left: 5px solid #64ffda;
     }
+    /* Special Explanation Box Style */
+    .explanation-box {
+        background-color: #121c31; 
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 15px;
+        margin-bottom: 10px;
+        border-left: 5px solid #8c9eff; 
+    }
     /* Code/Preformatted Text */
     code, pre {
         background-color: #1c2a42;
@@ -349,6 +358,23 @@ if lc_time is not None and lc_flux is not None:
                 """, 
                 unsafe_allow_html=True
             )
+            
+            # Explanation box added here for context
+            st.markdown(
+                f"""
+                <div class="explanation-box">
+                    <h4 style="color: #8c9eff;">Why is a Star flagged as an Exoplanet Candidate?</h4>
+                    <p>The TESS data we analyze measures the brightness of the star you entered (a TIC ID). This high classification means the <strong>Box-Least Squares (BLS)</strong> algorithm found a strong, repeating pattern:</p>
+                    <ol>
+                        <li><strong>Periodic Dimming (Transit Method):</strong> A small, temporary, and periodic dip in the star's light, consistent with an object (like a planet) passing in front of it. </li>
+                        <li><strong>BLS Power:</strong> High BLS power indicates the signal is robust and non-random.</li>
+                        <li><strong>"Candidate" Status:</strong> The star is flagged as a candidate because the dimming pattern is compelling. It remains a "candidate" until further, more expensive observations (like spectroscopy) can confirm the object orbiting the star is truly a planet, and not a false positive (e.g., a background eclipsing binary star).</li>
+                    </ol>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
         else:
             st.markdown(
                 f"""
