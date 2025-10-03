@@ -183,8 +183,7 @@ st.markdown("""
     }
     /* Header/Title Styling */
     .stMarkdown h1 {
-        color: #64ffda; /* Neon Green/Cyan */
-        text-shadow: 0 0 10px #64ffda, 0 0 20px #64ffda;
+        color: #8c9eff; /* Lighter Purple/Blue - Clean and clear */
         font-family: 'Inter', sans-serif;
     }
     /* Subheaders/Section Titles */
@@ -224,7 +223,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>🌌 StellarScan: AI/ML Exoplanet Finder</h1>", unsafe_allow_html=True)
+st.markdown("<h1>🌌 StellarScan</h1>", unsafe_allow_html=True)
 st.markdown("""
 <p>Harnessing the power of signal processing and machine learning principles to detect periodic variability, which may indicate the presence of an orbiting exoplanet or stellar activity.</p>
 """, unsafe_allow_html=True)
