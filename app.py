@@ -42,7 +42,7 @@ def compute_flux_stats(flux):
     rel_std = std / mean
     return amp, rms, mean, std, rel_std
 
-@st.cache_data(show_spinner="Analyzing variability with Lomb-Scargle and BLS...")
+@st.cache_data(show_spinner="Step 2/3: Running periodograms (Lomb-Scargle and BLS)...")
 def run_analysis(time, flux):
     """
     Performs the core Lomb-Scargle and Box-Least Squares analysis.
@@ -251,12 +251,14 @@ if analysis_mode == '1. Search by TESS ID (TIC)':
     
     if st.button("Analyze TIC ID"):
         if tic_id:
+            # Create an empty placeholder to update status messages
+            status_placeholder = st.empty()
             try:
-                # 1. Data Fetch and Clean
-                st.info(f"Searching for light curve data for **{tic_id}**...")
+                # 1. Data Fetch and Clean - Explicit Status
+                status_placeholder.info(f"Step 1/3: Searching and downloading light curve data for **{tic_id}**...")
                 sector_data = search_lightcurve(tic_id)
                 if not sector_data:
-                    st.error("No light curve data found for this TIC ID.")
+                    status_placeholder.error("No light curve data found for this TIC ID.")
                     st.stop()
                 
                 # Download the first available sector
@@ -265,7 +267,7 @@ if analysis_mode == '1. Search by TESS ID (TIC)':
                     lc_raw = sector_data[0].download(flux_column="sap_flux")
                 
                 if lc_raw is None:
-                    st.error("Failed to download flux data. Try a different sector.")
+                    status_placeholder.error("Failed to download flux data. Try a different sector.")
                     st.stop()
                     
                 lc_clean = clean_lightcurve(lc_raw)
@@ -273,9 +275,11 @@ if analysis_mode == '1. Search by TESS ID (TIC)':
                 lc_time = lc_clean.time.value
                 lc_flux = lc_clean.flux.value
                 target_title = tic_id
+                
+                status_placeholder.success(f"Step 1/3: Data downloaded and cleaned successfully for {target_title}.")
 
             except Exception as e:
-                st.error(f"An error occurred during data fetching or cleaning: {e}")
+                status_placeholder.error(f"An error occurred during data fetching or cleaning: {e}")
                 st.stop()
         else:
             st.warning("Please enter a TIC ID to start the analysis.")
@@ -291,11 +295,12 @@ elif analysis_mode == '2. Upload CSV Data':
     if uploaded_file is not None:
         try:
             # 1. Read Data
+            status_placeholder = st.info("Step 1/3: Reading and cleaning uploaded data...")
             data = pd.read_csv(uploaded_file)
             
             # 2. Validate columns
             if 'time' not in data.columns or 'flux' not in data.columns:
-                st.error("CSV must contain columns named 'time' and 'flux'.")
+                status_placeholder.error("CSV must contain columns named 'time' and 'flux'.")
                 st.stop()
             
             # 3. Clean and Assign
@@ -308,6 +313,7 @@ elif analysis_mode == '2. Upload CSV Data':
             lc_flux = lc_flux[valid_indices]
             
             target_title = uploaded_file.name
+            status_placeholder.success("Step 1/3: Data uploaded and cleaned successfully.")
             
         except Exception as e:
             st.error(f"Error processing the uploaded file: {e}")
@@ -320,6 +326,7 @@ if lc_time is not None and lc_flux is not None:
     if len(lc_time) < 100:
         st.error("Data too short for reliable analysis. Need at least 100 data points.")
     else:
+        # Step 2: Analysis is run here, relying on the @st.cache_data spinner for status
         results = run_analysis(lc_time, lc_flux)
         
         # Unpack results
@@ -369,11 +376,12 @@ if lc_time is not None and lc_flux is not None:
             st.markdown(f'<div class="data-box"><strong>Light Curve Amplitude</strong><br>{amp:.2f}%</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="data-box"><strong>Relative Std Dev</strong><br>{rel_std:.6f}</div>', unsafe_allow_html=True)
         
-        # --- Plotting ---
+        # --- Plotting - Explicit Status ---
         st.markdown("<h2>Visualization and Inspection</h2>", unsafe_allow_html=True)
         
         # Generate all plots
-        fig_lc, fig_ls, fig_bls, fig_ls_fold, fig_bls_fold = create_plots(lc_time, lc_flux, results, target_title)
+        with st.spinner("Step 3/3: Generating all periodograms and folded light curves..."):
+            fig_lc, fig_ls, fig_bls, fig_ls_fold, fig_bls_fold = create_plots(lc_time, lc_flux, results, target_title)
         
         # Display plots in sections
         
