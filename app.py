@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 # --- CONFIGURATION (Based on user-provided parameters) ---
-MIN_PERIOD = 0.5  # Increased slightly for more meaningful web results
+MIN_PERIOD = 0.5 # Increased slightly for more meaningful web results
 MAX_PERIOD = 30
 BLS_DURATION = 0.1
 FAP_LEVEL = 0.001 # Stricter FAP for potential transit detection
@@ -383,7 +383,7 @@ if lc_time is not None and lc_flux is not None:
                 unsafe_allow_html=True
             )
             
-            # New section on Radial Velocity Confirmation
+            # Section on Radial Velocity Confirmation
             st.markdown(
                 """
                 <div class="confirmation-box">
