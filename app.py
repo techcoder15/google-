@@ -6,12 +6,12 @@ from astropy.timeseries import BoxLeastSquares, LombScargle
 from lightkurve import search_lightcurve
 import warnings
 
-# Suppress harmless astropy/lightkurve warnings in the webapp environment
+
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# --- CONFIGURATION (Based on user-provided parameters) ---
+
 MIN_PERIOD = 0.5 # Increased slightly for more meaningful web results
 MAX_PERIOD = 30
 BLS_DURATION = 0.1
@@ -22,7 +22,7 @@ AMP_THRESHOLD = 0.5
 REL_STD_THRESHOLD = 0.001
 N_BLS_FREQS = 10000
 
-# --- HELPER FUNCTIONS ---
+
 
 def clean_lightcurve(lc):
     """Selects and cleans the appropriate flux column."""
@@ -50,27 +50,24 @@ def run_analysis(time, flux):
     # 1. Compute basic statistics
     amp, rms, rel_std = compute_flux_stats(flux)[0:3]
 
-    # 2. Lomb-Scargle (LS) Analysis
-    # We use Astropy for more control over FAP
+
     ls = LombScargle(time, flux)
     ls_freq, ls_power = ls.autopower(
         minimum_frequency=1/MAX_PERIOD,
         maximum_frequency=1/MIN_PERIOD
     )
-    # Find the best period
+
     best_ls_index = np.argmax(ls_power)
     ls_best_period = 1.0 / ls_freq[best_ls_index]
     ls_max_power = ls_power[best_ls_index]
     fap = ls.false_alarm_level(FAP_LEVEL)
 
-    # 3. Box Least Squares (BLS) Analysis
     bls = BoxLeastSquares(time, flux)
     bls_periods = np.linspace(MIN_PERIOD + 0.01, MAX_PERIOD, N_BLS_FREQS)
     bls_result = bls.power(bls_periods, BLS_DURATION)
     bls_best_period = bls_result.period[np.argmax(bls_result.power)]
     bls_max_power = np.max(bls_result.power)
     
-    # 4. AI/ML Classification (Rule-Based Simulation)
     is_bls_variable = (bls_max_power > BLS_POWER_THRESHOLD)
 
     is_exoplanet_candidate = (
@@ -94,7 +91,7 @@ def create_plots(time, flux, results, title=""):
     ls_best_period, ls_max_power, fap = results["ls"]
     bls_best_period, bls_max_power = results["bls"]
 
-    # --- Setup Figures ---
+
     fig_lc, ax_lc = plt.subplots(1, 1, figsize=(10, 4))
     fig_ls, ax_ls = plt.subplots(1, 1, figsize=(10, 4))
     fig_bls, ax_bls = plt.subplots(1, 1, figsize=(10, 4))
