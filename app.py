@@ -6,55 +6,68 @@ from astropy.timeseries import BoxLeastSquares, LombScargle
 from lightkurve import search_lightcurve
 import warnings
 
-
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-
-MIN_PERIOD = 0.5 # Increased slightly for more meaningful web results
+# --- Parameters ---
+MIN_PERIOD = 0.5  # Increased slightly for more meaningful web results
 MAX_PERIOD = 30
 BLS_DURATION = 0.1
-FAP_LEVEL = 0.001 # Stricter FAP for potential transit detection
+FAP_LEVEL = 0.001  # Stricter FAP for potential transit detection
 BLS_POWER_THRESHOLD = 0.5
 RMS_THRESHOLD = 0.0005
 AMP_THRESHOLD = 0.5
 REL_STD_THRESHOLD = 0.001
 N_BLS_FREQS = 10000
 
+# --- Utilities ---
 
 
 def clean_lightcurve(lc):
-    """Selects and cleans the appropriate flux column."""
-    if hasattr(lc, 'PDCSAP_FLUX') and lc.PDCSAP_FLUX is not None:
-        lc = lc.PDCSAP_FLUX
-    else:
-        lc = lc.SAP_FLUX
-    # Remove NaN values and 5-sigma outliers
+    """Selects and cleans the appropriate flux column and removes outliers/nans."""
+    # If lc is a LightCurve or LightCurveCollection element, pick PDCSAP if available
+    try:
+        if hasattr(lc, 'PDCSAP_FLUX') and lc.PDCSAP_FLUX is not None:
+            lc = lc.PDCSAP_FLUX
+        else:
+            lc = lc.SAP_FLUX
+    except Exception:
+        # If passed a plain lightkurve LightCurve, fallback
+        pass
+
+    # Remove NaN values and 5-sigma outliers (lightkurve LightCurve methods)
     return lc.remove_nans().remove_outliers(sigma=5)
+
 
 def compute_flux_stats(flux):
     """Calculates descriptive statistics for the light curve flux."""
-    mean = np.mean(flux)
-    std = np.std(flux)
-    amp = 100 * (np.nanmax(flux) - np.nanmin(flux)) / mean
-    rms = np.sqrt(np.mean((flux - mean)**2))
-    rel_std = std / mean
+    mean = np.nanmean(flux)
+    std = np.nanstd(flux)
+    amp = 100 * (np.nanmax(flux) - np.nanmin(flux)) / mean if mean != 0 else 0.0
+    rms = np.sqrt(np.nanmean((flux - mean) ** 2))
+    rel_std = std / mean if mean != 0 else np.inf
     return amp, rms, mean, std, rel_std
+
 
 @st.cache_data(show_spinner="Step 2/3: Running periodograms (Lomb-Scargle and BLS)...")
 def run_analysis(time, flux):
     """
     Performs the core Lomb-Scargle and Box-Least Squares analysis.
+    Returns a dict with stats, ls results, bls results and classification boolean.
     """
-    # 1. Compute basic statistics
-    amp, rms, rel_std = compute_flux_stats(flux)[0:3]
+    # Ensure numpy arrays
+    time = np.asarray(time)
+    flux = np.asarray(flux)
 
+    # 1. Compute basic statistics (fixed unpacking bug)
+    amp, rms, mean, std, rel_std = compute_flux_stats(flux)
 
+    # 2. Lomb-Scargle
     ls = LombScargle(time, flux)
     ls_freq, ls_power = ls.autopower(
-        minimum_frequency=1/MAX_PERIOD,
-        maximum_frequency=1/MIN_PERIOD
+        minimum_frequency=1.0 / MAX_PERIOD,
+        maximum_frequency=1.0 / MIN_PERIOD
     )
 
     best_ls_index = np.argmax(ls_power)
@@ -62,18 +75,20 @@ def run_analysis(time, flux):
     ls_max_power = ls_power[best_ls_index]
     fap = ls.false_alarm_level(FAP_LEVEL)
 
+    # 3. Box Least Squares (BLS)
     bls = BoxLeastSquares(time, flux)
     bls_periods = np.linspace(MIN_PERIOD + 0.01, MAX_PERIOD, N_BLS_FREQS)
     bls_result = bls.power(bls_periods, BLS_DURATION)
     bls_best_period = bls_result.period[np.argmax(bls_result.power)]
     bls_max_power = np.max(bls_result.power)
-    
+
+    # 4. Simple classification rules
     is_bls_variable = (bls_max_power > BLS_POWER_THRESHOLD)
 
     is_exoplanet_candidate = (
-        is_bls_variable and # Requires BLS detection
-        (bls_max_power > BLS_POWER_THRESHOLD) and # Must pass power threshold
-        (rel_std < 0.01) # Typically lower scatter for transits vs. stellar activity
+        is_bls_variable and  # Requires BLS detection
+        (bls_max_power > BLS_POWER_THRESHOLD) and  # Must pass power threshold
+        (rel_std < 0.01)  # Typically lower scatter for transits vs. stellar activity
     )
 
     return {
@@ -83,24 +98,24 @@ def run_analysis(time, flux):
         "classification": is_exoplanet_candidate
     }
 
+
 def create_plots(time, flux, results, title=""):
     """
-    Generates all necessary plots for the analysis.
+    Generates all necessary plots for the analysis and returns matplotlib Figure objects.
     """
     # Unpack results
     ls_best_period, ls_max_power, fap = results["ls"]
     bls_best_period, bls_max_power = results["bls"]
-
 
     fig_lc, ax_lc = plt.subplots(1, 1, figsize=(10, 4))
     fig_ls, ax_ls = plt.subplots(1, 1, figsize=(10, 4))
     fig_bls, ax_bls = plt.subplots(1, 1, figsize=(10, 4))
     fig_ls_fold, ax_ls_fold = plt.subplots(1, 1, figsize=(10, 4))
     fig_bls_fold, ax_bls_fold = plt.subplots(1, 1, figsize=(10, 4))
-    
-    # Set space theme colors
+
+    # Use dark theme style for plots
     plt.style.use('dark_background')
-    
+
     # --- 1. Cleaned Light Curve ---
     ax_lc.plot(time, flux, '.', color='#8c9eff', markersize=3, alpha=0.7)
     ax_lc.set_xlabel("Time [BTJD]")
@@ -111,10 +126,12 @@ def create_plots(time, flux, results, title=""):
     # --- 2. Lomb-Scargle Periodogram ---
     ls = LombScargle(time, flux)
     ls_freq, ls_power = ls.autopower(
-        minimum_frequency=1/MAX_PERIOD,
-        maximum_frequency=1/MIN_PERIOD
+        minimum_frequency=1.0 / MAX_PERIOD,
+        maximum_frequency=1.0 / MIN_PERIOD
     )
-    ax_ls.plot(1.0/ls_freq, ls_power, color='#ff69b4', label="LS Power")
+    # Avoid dividing by zero if freq contains 0
+    period_axis = 1.0 / ls_freq
+    ax_ls.plot(period_axis, ls_power, color='#ff69b4', label="LS Power")
     ax_ls.axhline(fap, color='yellow', linestyle='--', label=f'{FAP_LEVEL*100:.1f}% FAP Threshold')
     ax_ls.axvline(ls_best_period, color='cyan', linestyle='-', label=f"Best Period: {ls_best_period:.4f} d")
     ax_ls.set_xlabel("Period [days]")
@@ -127,7 +144,7 @@ def create_plots(time, flux, results, title=""):
     bls = BoxLeastSquares(time, flux)
     bls_periods = np.linspace(MIN_PERIOD + 0.01, MAX_PERIOD, N_BLS_FREQS)
     bls_result = bls.power(bls_periods, BLS_DURATION)
-    
+
     ax_bls.plot(bls_result.period, bls_result.power, color='#66ff66')
     ax_bls.axvline(bls_best_period, color='orange', linestyle='-', label=f"Best Period: {bls_best_period:.4f} d")
     ax_bls.axhline(BLS_POWER_THRESHOLD, color='red', linestyle='--', label="BLS Power Threshold")
@@ -140,25 +157,19 @@ def create_plots(time, flux, results, title=""):
     # --- 4. LS Folded Light Curve ---
     phase_ls = (time % ls_best_period) / ls_best_period
     ax_ls_fold.plot(phase_ls, flux, '.', color='#8c9eff', markersize=3, alpha=0.5)
-    
-    # Plot twice for wrap-around view
     phase_ls_wrap = phase_ls + 1
     ax_ls_fold.plot(phase_ls_wrap, flux, '.', color='#8c9eff', markersize=3, alpha=0.5)
-
     ax_ls_fold.set_xlabel("Phase")
     ax_ls_fold.set_ylabel("Normalized Flux")
     ax_ls_fold.set_title(f"Folded Light Curve (LS Period: {ls_best_period:.4f} d)")
     ax_ls_fold.grid(True, alpha=0.2)
     ax_ls_fold.set_xlim(0, 2)
-    
+
     # --- 5. BLS Folded Light Curve ---
     phase_bls = (time % bls_best_period) / bls_best_period
     ax_bls_fold.plot(phase_bls, flux, '.', color='#66ff66', markersize=3, alpha=0.5)
-    
-    # Plot twice for wrap-around view
     phase_bls_wrap = phase_bls + 1
     ax_bls_fold.plot(phase_bls_wrap, flux, '.', color='#66ff66', markersize=3, alpha=0.5)
-
     ax_bls_fold.set_xlabel("Phase")
     ax_bls_fold.set_ylabel("Normalized Flux")
     ax_bls_fold.set_title(f"Folded Light Curve (BLS Period: {bls_best_period:.4f} d)")
@@ -166,6 +177,7 @@ def create_plots(time, flux, results, title=""):
     ax_bls_fold.set_xlim(0, 2)
 
     return fig_lc, fig_ls, fig_bls, fig_ls_fold, fig_bls_fold
+
 
 # --- STREAMLIT APP LAYOUT ---
 
@@ -255,40 +267,36 @@ lc_flux = None
 target_title = None
 
 if analysis_mode == '1. Search by TESS ID (TIC)':
-    
     st.markdown("<h2>Search by TESS Input Catalog (TIC) ID</h2>", unsafe_allow_html=True)
     tic_id = st.text_input(
-        "Enter a TESS Input Catalog (TIC) ID (e.g., TIC 168789840):", 
+        "Enter a TESS Input Catalog (TIC) ID (e.g., TIC 168789840):",
         value='TIC 168789840'
     ).strip()
-    
+
     if st.button("Analyze TIC ID"):
         if tic_id:
-            # Create an empty placeholder to update status messages
             status_placeholder = st.empty()
             try:
-                # 1. Data Fetch and Clean - Explicit Status
                 status_placeholder.info(f"Step 1/3: Searching and downloading light curve data for **{tic_id}**...")
                 sector_data = search_lightcurve(tic_id)
                 if not sector_data:
                     status_placeholder.error("No light curve data found for this TIC ID.")
                     st.stop()
-                
+
                 # Download the first available sector
                 lc_raw = sector_data[0].download(flux_column="pdcsap_flux")
                 if lc_raw is None:
                     lc_raw = sector_data[0].download(flux_column="sap_flux")
-                
+
                 if lc_raw is None:
                     status_placeholder.error("Failed to download flux data. Try a different sector.")
                     st.stop()
-                    
+
                 lc_clean = clean_lightcurve(lc_raw)
-                
                 lc_time = lc_clean.time.value
                 lc_flux = lc_clean.flux.value
                 target_title = tic_id
-                
+
                 status_placeholder.success(f"Step 1/3: Data downloaded and cleaned successfully for {target_title}.")
 
             except Exception as e:
@@ -297,51 +305,124 @@ if analysis_mode == '1. Search by TESS ID (TIC)':
         else:
             st.warning("Please enter a TIC ID to start the analysis.")
 
+
+# ---- UPDATED Upload CSV Data: accepts single-column CSV with 'tic_id' ----
 elif analysis_mode == '2. Upload CSV Data':
-    
-    st.markdown("<h2>Upload Custom CSV Light Curve</h2>", unsafe_allow_html=True)
+    st.markdown("<h2>Upload CSV of TIC IDs</h2>", unsafe_allow_html=True)
+    st.markdown(
+        "<p>Upload a CSV file containing a single column named <code>tic_id</code>.<br>"
+        "Each row should contain one TESS Input Catalog ID (e.g., TIC 168789840).</p>",
+        unsafe_allow_html=True
+    )
+
     uploaded_file = st.file_uploader(
-        "Upload a CSV file (must contain 'time' and 'flux' columns):", 
+        "Upload CSV file containing TIC IDs:",
         type="csv"
     )
 
     if uploaded_file is not None:
         try:
-            # 1. Read Data
-            status_placeholder = st.info("Step 1/3: Reading and cleaning uploaded data...")
             data = pd.read_csv(uploaded_file)
-            
-            # 2. Validate columns
-            if 'time' not in data.columns or 'flux' not in data.columns:
-                status_placeholder.error("CSV must contain columns named 'time' and 'flux'.")
-                st.stop()
-            
-            # 3. Clean and Assign
-            lc_time = data['time'].values
-            lc_flux = data['flux'].values
-            
-            # Simple clean: remove NaNs
-            valid_indices = ~np.isnan(lc_time) & ~np.isnan(lc_flux)
-            lc_time = lc_time[valid_indices]
-            lc_flux = lc_flux[valid_indices]
-            
-            target_title = uploaded_file.name
-            status_placeholder.success("Step 1/3: Data uploaded and cleaned successfully.")
-            
-        except Exception as e:
-            st.error(f"Error processing the uploaded file: {e}")
-            st.stop()
-    
-# --- RUN ANALYSIS AND DISPLAY RESULTS ---
 
-if lc_time is not None and lc_flux is not None:
-    
+            # Validate column
+            if 'tic_id' not in data.columns:
+                st.error("CSV must contain a column named 'tic_id'.")
+                st.stop()
+
+            tic_list = data['tic_id'].dropna().astype(str).tolist()
+            st.success(f"Loaded {len(tic_list)} TIC IDs from file.")
+            st.markdown("---")
+
+            for i, tic_id in enumerate(tic_list, start=1):
+                st.markdown(f"<h3>🔭 Analyzing {tic_id} ({i}/{len(tic_list)})</h3>", unsafe_allow_html=True)
+                status_placeholder = st.empty()
+
+                try:
+                    # Step 1: Fetch light curve
+                    status_placeholder.info(f"Step 1/3: Searching and downloading light curve for **{tic_id}**...")
+                    sector_data = search_lightcurve(tic_id)
+
+                    if not sector_data:
+                        status_placeholder.error(f"No light curve data found for {tic_id}.")
+                        continue
+
+                    lc_raw = sector_data[0].download(flux_column="pdcsap_flux")
+                    if lc_raw is None:
+                        lc_raw = sector_data[0].download(flux_column="sap_flux")
+
+                    if lc_raw is None:
+                        status_placeholder.error(f"Failed to download flux data for {tic_id}.")
+                        continue
+
+                    lc_clean = clean_lightcurve(lc_raw)
+                    lc_time = lc_clean.time.value
+                    lc_flux = lc_clean.flux.value
+
+                    status_placeholder.success(f"Data downloaded and cleaned for {tic_id} ✅")
+
+                    # Step 2: Run Analysis
+                    results = run_analysis(lc_time, lc_flux)
+
+                    amp, rms, rel_std = results["stats"]
+                    ls_best_period, ls_max_power, fap = results["ls"]
+                    bls_best_period, bls_max_power = results["bls"]
+                    is_exoplanet_candidate = results["classification"]
+
+                    # Display classification
+                    if is_exoplanet_candidate:
+                        st.markdown(
+                            f"""
+                            <div class="data-box" style="border-left: 5px solid #ff0077;">
+                                <h4 style="color: #ff0077;">⚠️ Exoplanet Candidate Detected: {tic_id}</h4>
+                                <p>BLS power = {bls_max_power:.4f} at {bls_best_period:.4f} days. 
+                                Likely transit signature detected.</p>
+                            </div>
+                            """, unsafe_allow_html=True
+                        )
+                    else:
+                        st.markdown(
+                            f"""
+                            <div class="data-box">
+                                <h4 style="color: #64ffda;">✅ No Strong Transit: {tic_id}</h4>
+                                <p>Signal appears consistent with stellar variability or noise.</p>
+                            </div>
+                            """, unsafe_allow_html=True
+                        )
+
+                    # Step 3: Plots
+                    with st.spinner("Generating plots..."):
+                        fig_lc, fig_ls, fig_bls, fig_ls_fold, fig_bls_fold = create_plots(lc_time, lc_flux, results, tic_id)
+
+                    st.subheader("Original Cleaned Light Curve")
+                    st.pyplot(fig_lc)
+                    colp1, colp2 = st.columns(2)
+                    with colp1:
+                        st.subheader("Lomb-Scargle Periodogram")
+                        st.pyplot(fig_ls)
+                    with colp2:
+                        st.subheader("BLS Periodogram")
+                        st.pyplot(fig_bls)
+                    st.subheader("Folded Light Curves (BLS then LS)")
+                    st.pyplot(fig_bls_fold)
+                    st.pyplot(fig_ls_fold)
+
+                    st.markdown("---")
+
+                except Exception as e:
+                    status_placeholder.error(f"Error analyzing {tic_id}: {e}")
+                    continue
+        except Exception as e:
+            st.error(f"Error processing the uploaded CSV: {e}")
+            st.stop()
+
+# --- RUN ANALYSIS AND DISPLAY RESULTS FOR SINGLE (non-batch) CASE ---
+if lc_time is not None and lc_flux is not None and analysis_mode == '1. Search by TESS ID (TIC)':
     if len(lc_time) < 100:
         st.error("Data too short for reliable analysis. Need at least 100 data points.")
     else:
-        # Step 2: Analysis is run here, relying on the @st.cache_data spinner for status
+        # Step 2: Analysis is run here
         results = run_analysis(lc_time, lc_flux)
-        
+
         # Unpack results
         amp, rms, rel_std = results["stats"]
         ls_best_period, ls_max_power, fap = results["ls"]
@@ -349,7 +430,7 @@ if lc_time is not None and lc_flux is not None:
         is_exoplanet_candidate = results["classification"]
 
         st.markdown(f"<h2>Analysis Results for {target_title}</h2>", unsafe_allow_html=True)
-        
+
         # --- AI/ML Classification Panel ---
         st.markdown("<h3>AI Stellar Classification</h3>", unsafe_allow_html=True)
         if is_exoplanet_candidate:
@@ -359,11 +440,10 @@ if lc_time is not None and lc_flux is not None:
                     <h4 style="color: #ff0077;">⚠️ Exoplanet Candidate Detected ⚠️</h4>
                     <p>The Box-Least Squares (BLS) power is significantly high at {bls_best_period:.4f} days, and the light curve scatter is low. This pattern strongly suggests a potential planetary transit signal (AI Score: HIGH).</p>
                 </div>
-                """, 
+                """,
                 unsafe_allow_html=True
             )
-            
-            # Explanation box for Exoplanet Candidate status
+
             st.markdown(
                 f"""
                 <div class="explanation-box">
@@ -378,8 +458,7 @@ if lc_time is not None and lc_flux is not None:
                 """,
                 unsafe_allow_html=True
             )
-            
-            # Section on Radial Velocity Confirmation
+
             st.markdown(
                 """
                 <div class="confirmation-box">
@@ -403,18 +482,18 @@ if lc_time is not None and lc_flux is not None:
                     <h4 style="color: #64ffda;">✅ Stellar Activity / No Strong Transit Signal</h4>
                     <p>The primary signal appears to be related to stellar rotation (Lomb-Scargle power) or does not meet the necessary criteria for a reliable exoplanet candidate (AI Score: LOW).</p>
                 </div>
-                """, 
+                """,
                 unsafe_allow_html=True
             )
-            
+
         st.markdown("<h3>Key Analysis Metrics</h3>", unsafe_allow_html=True)
 
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             st.markdown(f'<div class="data-box"><strong>BLS Best Period</strong><br>{bls_best_period:.4f} days</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="data-box"><strong>BLS Max Power</strong><br>{bls_max_power:.4f}</div>', unsafe_allow_html=True)
-        
+
         with col2:
             st.markdown(f'<div class="data-box"><strong>LS Best Period</strong><br>{ls_best_period:.4f} days</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="data-box"><strong>LS Max Power</strong><br>{ls_max_power:.4f}</div>', unsafe_allow_html=True)
@@ -422,19 +501,18 @@ if lc_time is not None and lc_flux is not None:
         with col3:
             st.markdown(f'<div class="data-box"><strong>Light Curve Amplitude</strong><br>{amp:.2f}%</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="data-box"><strong>Relative Std Dev</strong><br>{rel_std:.6f}</div>', unsafe_allow_html=True)
-        
+
         # --- Plotting - Explicit Status ---
         st.markdown("<h2>Visualization and Inspection</h2>", unsafe_allow_html=True)
-        
+
         # Generate all plots
         with st.spinner("Step 3/3: Generating all periodograms and folded light curves..."):
             fig_lc, fig_ls, fig_bls, fig_ls_fold, fig_bls_fold = create_plots(lc_time, lc_flux, results, target_title)
-        
+
         # Display plots in sections
-        
         st.subheader("1. Original Cleaned Light Curve")
         st.pyplot(fig_lc)
-        
+
         st.subheader("2. Periodograms")
         col_p1, col_p2 = st.columns(2)
         with col_p1:
@@ -448,6 +526,6 @@ if lc_time is not None and lc_flux is not None:
 
         st.markdown(f"**Folded by LS Period ({ls_best_period:.4f} d):** This reveals stellar rotation or other periodic stellar activity.", unsafe_allow_html=True)
         st.pyplot(fig_ls_fold)
-        
+
         st.markdown("---")
         st.markdown("Analysis Complete. Use the metrics and plots to vet the candidate.")
